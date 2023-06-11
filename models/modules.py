@@ -11,6 +11,7 @@ from local_attention import LocalAttention
 
 class LocalWrapper(nn.Module):
     def __init__(self, input_dim, num_heads, window_size=7):
+        super(LocalWrapper, self).__init__()
         self.local_attn = LocalAttention(dim=input_dim, window_size=window_size, shared_qk=True, causal=True)
         self.Wq = nn.Linear(input_dim, input_dim)
         self.Wk = nn.Linear(input_dim, input_dim)
@@ -73,7 +74,8 @@ class MSA(nn.Module):
         self.input_dim = input_dim
         self.num_heads = num_heads
         
-        
+        self.query_seq_len = query_seq_len
+        self.kv_seq_len = kv_seq_len
         self.head_dim = input_dim // num_heads
         
         self.query = nn.Linear(input_dim, input_dim)
@@ -99,7 +101,7 @@ class MSA(nn.Module):
         values = self.split_heads(values)  # (batch_size, num_heads, seq_len, head_dim)
         
         attn_scores = torch.matmul(queries, keys.transpose(2, 3))  # (batch_size, num_heads, seq_len, seq_len)
-        attn_scores = attn_scores + self.pe
+        attn_scores = attn_scores #+ self.pe
         attn_probs = self.softmax(attn_scores)
         
         attended = torch.matmul(attn_probs, values)  
@@ -145,6 +147,7 @@ class Deformable(nn.Module):
         self.MLP = nn.Linear(input_dim, input_dim)
         self.act = nn.GELU()
 
+
     def forward(self, x):
         """
             input_dim: b,c,h,w
@@ -162,7 +165,7 @@ class Deformable(nn.Module):
         ref_x = torch.arange(-1,1, 2/W_g) + 1/W_g
         ref_y = torch.arange(-1,1, 2/H_g) + 1/H_g
         grid_x, grid_y = torch.meshgrid(ref_x, ref_y, indexing="ij")
-        refs = torch.stack([grid_x, grid_y], dim=-1).permute((2,0,1))
+        refs = torch.stack([grid_x, grid_y], dim=-1).permute((2,0,1)).to(device=x_ln.device)
 
         #refs = torch.cat(tuple(torch.dstack([grid_x, grid_y])))
 
@@ -211,21 +214,25 @@ class OffsetNetwork(nn.Module):
 
 
 class Stage(nn.Module):
-    def __init__(self, dim, spatial_dim, N, kernel_size, n_head, block_types, window_size=7):
+    def __init__(self, dim, spatial_dim, N, n_head, block_types, window_size=7):
         super(Stage, self).__init__()
         self.dim = dim
         self.N = N
         self.n_head = n_head
         self.window_size = window_size
-        blocks = nn.ModuleList()
+        self.blocks = nn.ModuleList()
         for type in block_types:
             if type == "Local":
-                blocks.append(LocalWrapper(input_dim=dim, num_heads=n_head, window_size=window_size))
+                self.blocks.append(LocalWrapper(input_dim=dim, num_heads=n_head, window_size=window_size))
             elif type == "Shifted":
-                blocks.append(SWA(input_dim=dim, num_heads=n_head, window_size=window_size))
+                self.blocks.append(SWA(input_dim=dim, num_heads=n_head, window_size=window_size))
             elif type == "Deformable":
-                blocks.append(Deformable(input_dim=dim, r=4, n_head=n_head, query_seq_len=spatial_dim*spatial_dim))
-
+                self.blocks.append(Deformable(input_dim=dim, r=2, n_head=n_head, query_seq_len=spatial_dim*spatial_dim))
+    def forward(self,x):
+        for block in self.blocks:
+            x = block(x)
+        return x
+    
             
 
 
