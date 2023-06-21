@@ -55,7 +55,7 @@ class DAT(nn.Module):
         x = self.stage4(x).permute((0,3,1,2))
         x = x.reshape(x.shape[0], -1)
         x = self.linear(x)
-        x = self.softmax(x)
+        # x = self.softmax(x)
         return x
 
 

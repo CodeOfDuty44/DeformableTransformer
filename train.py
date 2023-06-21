@@ -8,13 +8,15 @@ import torchvision.datasets as datasets
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
+import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
-def train(model, tr_loader, val_loader, optimizer, criterion, max_epoch, print_per_iter):
+def train(model, tr_loader, val_loader, optimizer, criterion, max_epoch, print_per_iter, val_per_iter):
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    writer = SummaryWriter()
+    # writer = SummaryWriter()
     model = model.to(device)
     count = 0
+    best_val_acc = 0
     for ep in range(max_epoch):
         model.train()
 
@@ -24,16 +26,47 @@ def train(model, tr_loader, val_loader, optimizer, criterion, max_epoch, print_p
             data = data.to(device)
             label = label.to(device)
             out = model(data)
-            loss = criterion(out, torch.nn.functional.one_hot(label,1000).to(torch.float))
+            # loss = criterion(out, torch.nn.functional.one_hot(label,1000).to(torch.float))
+            loss = criterion(out,label)
             loss.backward()
             optimizer.step()
-            writer.add_scalar("Loss", loss,count)
+            # writer.add_scalar("Loss/train", loss,count)
 
             iter_num += 1
             count += 1
             if iter_num % print_per_iter == 0:
                 print(f'Epoch {ep:4d} Iter {iter_num:6d} ---> Loss: {loss}')
             
+            if iter_num % val_per_iter == 0:
+                val_loss = 0
+                val_acc = 0
+                model.eval()
+                with torch.no_grad():
+                    for val_data, val_label in val_loader:
+                        val_data = val_data.to(device)
+                        val_label = val_label.to(device)
+                        val_out = model(val_data)
+                        val_loss += criterion(val_out, val_label).item()
+                        val_acc += (val_out.argmax(dim=1)==val_label).sum().item()
+                val_loss /= len(val_loader)
+                val_acc = 100 * (val_acc / len(val_loader))
+                print(f'Val Loss: {val_loss}   Val Acc: {val_acc}')
+                # writer.add_scalar("Loss/val", val_loss, count)
+                # writer.add_scalar("Acc/val", val_acc, count)
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    checkpoint = {
+                        'epoch' : ep + 1,
+                        'model' : model.state_dict(),
+                        'optimizer' : optimizer.state_dict(),
+                        'val_acc' : val_acc
+                    }
+                    torch.save(checkpoint, "checkpoint_best.pth.tar")
+
+                model.train()
+    # writer.close()
+
+
 
 
 def main():
@@ -44,9 +77,10 @@ def main():
     x = torch.randn(4,3,224,224).to(device=device)
     x.requires_grad = True
 
-    optimizer = optim.SGD(model.parameters(), lr = 0.0001, momentum=0.9)
-    criterion = torch.nn.BCELoss()
-    
+    # optimizer = optim.SGD(model.parameters(), lr = 0.0001, momentum=0.9)
+    # criterion = torch.nn.BCELoss()
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     tr_trans = transforms.Compose([
         transforms.Resize((224,224)),
@@ -54,14 +88,18 @@ def main():
         transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
     ])
 
-    dataset = datasets.ImageFolder('/home/ubuntu/Imagenet/imagenet/train', tr_trans)
+    tr_dataset = datasets.ImageFolder('/home/ubuntu/Imagenet/imagenet/ILSVRC/Data/CLS-LOC/train', tr_trans)
+    val_dataset = datasets.ImageFolder('/home/ubuntu/hacettepe/dat/DeformableTransformer/val_foldered', tr_trans)
+    # val_dataset = datasets.ImageNet(root="/home/ubuntu/Imagenet/imagenet/", split="val", transform=tr_trans)
+    # val_dataset = datasets.ImageFolder('/home/ubuntu/Imagenet/imagenet/ILSVRC/Data/CLS-LOC/val', tr_trans)
     # dataset = datasets.ImageNet(root='/home/ubuntu/Imagenet/imagenet', split='train', transform=tr_trans)
 
-    dataloder = DataLoader(dataset=dataset, shuffle = True, batch_size=16)
+    tr_dataloder = DataLoader(dataset=tr_dataset, shuffle = True, batch_size=64)
+    val_dataloder = DataLoader(dataset=val_dataset, shuffle = True, batch_size=64)
 
-    train(model=model, tr_loader=dataloder, val_loader=None, optimizer=optimizer, criterion=criterion, max_epoch=100, print_per_iter=5)
+    train(model=model, tr_loader=tr_dataloder, val_loader=val_dataloder, optimizer=optimizer, criterion=criterion, max_epoch=100, print_per_iter=50, val_per_iter=int(len(tr_dataloder)/100))
 
-    for data, label in dataloder:
+    for data, label in tr_dataloder:
         # data = data.reshape()
         data = data.to(device)
         label = label.to(device)
