@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from timm.models.layers import DropPath, to_2tuple
 
-from models.modules import Stage
+from modules import Stage #from models.modules?
 
 class DAT(nn.Module):
 
