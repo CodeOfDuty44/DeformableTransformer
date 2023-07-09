@@ -171,7 +171,7 @@ class Deformable(nn.Module):
 
         deformed_pts = refs + self.s * F.tanh(offsets)
         deformed_pts = (deformed_pts + 1) * H_g / 2 #check if it is valid for w_g as well
-        ccc=deformed_pts[(1, 0), ...]
+        ccc=deformed_pts[(0, 0), ...]
         ccc = ccc.permute((0,2,3,1))
         interpolated = F.grid_sample(
             input= x.permute((0,3,1,2)),
